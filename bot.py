@@ -1,330 +1,345 @@
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from flask import Flask
+from threading import Thread
+
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
-    ConversationHandler,
     ContextTypes,
     filters,
 )
 
-TOKEN = "YOUR_BOT_TOKEN"
+# =========================
+# BOT CONFIG
+# =========================
+
+TOKEN = "8903257700:AAEInd7G_-6z-wccRN5X3_L93qY6olUfelg"
 ADMIN_ID = 1812185709
 
-AGE, GENDER, INTEREST, BIO = range(4)
+# =========================
+# FLASK FOR RENDER
+# =========================
 
-users_data = {}
-waiting_users = []
+web = Flask(__name__)
+
+@web.route('/')
+def home():
+    return "MalluMate Bot Running"
+
+def run_web():
+    web.run(host="0.0.0.0", port=10000)
+
+Thread(target=run_web).start()
+
+# =========================
+# DATABASE
+# =========================
+
+waiting_male = []
+waiting_female = []
+
 active_chats = {}
-pending_requests = {}
 
+profiles = {}
+
+daily_limit = {}
+
+premium_users = []
+
+# =========================
+# START
+# =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
-    if user_id in users_data:
+    if user_id not in profiles:
+        profiles[user_id] = {
+            "name": update.effective_user.first_name,
+            "age": "Not Set",
+            "gender": "Not Set",
+            "bio": "No bio",
+        }
+
+    await update.message.reply_text(
+        "👋 Welcome to MalluMate\n\n"
+        "/setprofile name age gender bio\n"
+        "Example:\n"
+        "/setprofile Mirdas 20 Male Hi\n\n"
+        "/profile - View profile\n"
+        "/find - Find Partner\n"
+        "/next - Next Partner\n"
+        "/stop - Stop Chat\n"
+        "/users - Total Users (Admin)"
+    )
+
+# =========================
+# SET PROFILE
+# =========================
+
+async def setprofile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.chat_id
+
+    try:
+        data = context.args
+
+        name = data[0]
+        age = data[1]
+        gender = data[2]
+        bio = " ".join(data[3:])
+
+        profiles[user_id] = {
+            "name": name,
+            "age": age,
+            "gender": gender,
+            "bio": bio,
+        }
+
+        await update.message.reply_text("✅ Profile Updated")
+
+    except:
         await update.message.reply_text(
-            "👋 Welcome Back!\n\n"
-            "/find - Find Partner\n"
-            "/next - Next Partner\n"
-            "/stop - Stop Chat\n"
-            "/profile - View Profile\n"
-            "/users - Admin Only"
+            "❌ Usage:\n"
+            "/setprofile name age gender bio"
         )
-        return ConversationHandler.END
 
-    await update.message.reply_text("🎂 Enter your age:")
-    return AGE
-
-
-async def age(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.chat_id
-
-    users_data[user_id] = {}
-    users_data[user_id]["age"] = update.message.text
-
-    keyboard = [
-        [
-            InlineKeyboardButton("👦 Male", callback_data="male"),
-            InlineKeyboardButton("👧 Female", callback_data="female"),
-        ]
-    ]
-
-    await update.message.reply_text(
-        "Select your gender:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-    return GENDER
-
-
-async def gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.message.chat_id
-
-    users_data[user_id]["gender"] = query.data
-
-    keyboard = [
-        [
-            InlineKeyboardButton("👦 Boys", callback_data="male"),
-            InlineKeyboardButton("👧 Girls", callback_data="female"),
-            InlineKeyboardButton("🤝 Both", callback_data="both"),
-        ]
-    ]
-
-    await query.message.reply_text(
-        "Interested in:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-    )
-
-    return INTEREST
-
-
-async def interest(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.message.chat_id
-
-    users_data[user_id]["interest"] = query.data
-
-    await query.message.reply_text("📝 Write your bio:")
-    return BIO
-
-
-async def bio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.chat_id
-
-    users_data[user_id]["bio"] = update.message.text
-    users_data[user_id]["premium"] = False
-    users_data[user_id]["find_count"] = 0
-
-    await update.message.reply_text(
-        "✅ Profile created!\n\n"
-        "/find - Find Partner"
-    )
-
-    return ConversationHandler.END
-
+# =========================
+# VIEW PROFILE
+# =========================
 
 async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
-    if user_id not in users_data:
-        return
+    if user_id in profiles:
+        p = profiles[user_id]
 
-    data = users_data[user_id]
+        await update.message.reply_text(
+            f"👤 Name: {p['name']}\n"
+            f"🎂 Age: {p['age']}\n"
+            f"🚻 Gender: {p['gender']}\n"
+            f"📝 Bio: {p['bio']}"
+        )
 
-    text = (
-        f"👤 Your Profile\n\n"
-        f"🎂 Age: {data['age']}\n"
-        f"🚻 Gender: {data['gender']}\n"
-        f"❤️ Interested: {data['interest']}\n"
-        f"📝 Bio: {data['bio']}\n"
-        f"💎 Premium: {data['premium']}"
-    )
-
-    await update.message.reply_text(text)
-
+# =========================
+# FIND
+# =========================
 
 async def find(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
-    if user_id not in users_data:
-        await update.message.reply_text("/start first")
+    if user_id not in daily_limit:
+        daily_limit[user_id] = 0
+
+    if user_id not in premium_users:
+        if daily_limit[user_id] >= 200:
+            await update.message.reply_text(
+                "❌ Daily Limit Reached.\nPremium Required."
+            )
+            return
+
+    daily_limit[user_id] += 1
+
+    if user_id in active_chats:
+        await update.message.reply_text("⚠ Already connected.")
         return
 
-    if not users_data[user_id]["premium"]:
-        if users_data[user_id]["find_count"] >= 200:
-            await update.message.reply_text(
-                "❌ Daily limit reached.\nBuy Premium."
-            )
-            return
+    gender = profiles[user_id]["gender"].lower()
 
-    users_data[user_id]["find_count"] += 1
+    # Male searching female
+    if gender == "male":
 
-    for partner in waiting_users:
-        if partner != user_id:
-            partner_data = users_data[partner]
+        if waiting_female:
+            partner = waiting_female.pop(0)
 
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "✅ Accept",
-                        callback_data=f"accept_{partner}"
-                    ),
-                    InlineKeyboardButton(
-                        "❌ Skip",
-                        callback_data=f"skip_{partner}"
-                    ),
-                ]
-            ]
+            active_chats[user_id] = partner
+            active_chats[partner] = user_id
 
-            text = (
-                f"👤 New Match\n\n"
-                f"🎂 Age: {partner_data['age']}\n"
-                f"🚻 Gender: {partner_data['gender']}\n"
-                f"❤️ Interested: {partner_data['interest']}\n"
-                f"📝 Bio: {partner_data['bio']}"
+            await context.bot.send_message(
+                user_id,
+                "✅ Connected with Female Partner"
             )
 
-            pending_requests[user_id] = partner
+            await context.bot.send_message(
+                partner,
+                "✅ Connected with Male Partner"
+            )
+
+            await show_partner_profile(user_id, partner, context)
+            await show_partner_profile(partner, user_id, context)
+
+        else:
+            waiting_male.append(user_id)
 
             await update.message.reply_text(
-                text,
-                reply_markup=InlineKeyboardMarkup(keyboard),
+                "⏳ Waiting for female partner..."
             )
 
-            return
+    # Female searching male
+    elif gender == "female":
 
-    if user_id not in waiting_users:
-        waiting_users.append(user_id)
+        if waiting_male:
+            partner = waiting_male.pop(0)
 
-    await update.message.reply_text("⏳ Waiting for partner...")
+            active_chats[user_id] = partner
+            active_chats[partner] = user_id
 
+            await context.bot.send_message(
+                user_id,
+                "✅ Connected with Male Partner"
+            )
 
-async def match_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+            await context.bot.send_message(
+                partner,
+                "✅ Connected with Female Partner"
+            )
 
-    user_id = query.message.chat_id
-    data = query.data
+            await show_partner_profile(user_id, partner, context)
+            await show_partner_profile(partner, user_id, context)
 
-    if data.startswith("accept_"):
-        partner = int(data.split("_")[1])
+        else:
+            waiting_female.append(user_id)
 
-        active_chats[user_id] = partner
-        active_chats[partner] = user_id
+            await update.message.reply_text(
+                "⏳ Waiting for male partner..."
+            )
 
-        if partner in waiting_users:
-            waiting_users.remove(partner)
-
-        await query.message.reply_text("✅ Connected!")
-
-        await context.bot.send_message(
-            partner,
-            "✅ Someone accepted your profile!"
+    else:
+        await update.message.reply_text(
+            "❌ Set gender first using /setprofile"
         )
 
-    elif data.startswith("skip_"):
-        await query.message.reply_text("❌ Skipped")
+# =========================
+# SHOW PARTNER PROFILE
+# =========================
 
+async def show_partner_profile(user, partner, context):
+    p = profiles[partner]
+
+    await context.bot.send_message(
+        user,
+        f"👤 Partner Profile\n\n"
+        f"Name: {p['name']}\n"
+        f"Age: {p['age']}\n"
+        f"Gender: {p['gender']}\n"
+        f"Bio: {p['bio']}"
+    )
+
+# =========================
+# STOP CHAT
+# =========================
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
     if user_id in active_chats:
+
         partner = active_chats[user_id]
 
         del active_chats[user_id]
         del active_chats[partner]
 
-        await context.bot.send_message(user_id, "❌ Chat stopped")
+        await context.bot.send_message(
+            user_id,
+            "❌ Chat Ended"
+        )
+
         await context.bot.send_message(
             partner,
-            "❌ Partner disconnected"
+            "❌ Partner Left"
         )
 
     else:
-        await update.message.reply_text("No active chat")
+        await update.message.reply_text(
+            "⚠ No Active Chat"
+        )
 
+# =========================
+# NEXT CHAT
+# =========================
 
 async def next_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await stop(update, context)
     await find(update, context)
 
+# =========================
+# HANDLE MESSAGES
+# =========================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.chat_id
 
     if user_id in active_chats:
+
         partner = active_chats[user_id]
 
-        if update.message.text:
-            await context.bot.send_message(
-                partner,
-                update.message.text
-            )
+        await context.bot.send_message(
+            partner,
+            update.message.text
+        )
 
-        elif update.message.photo:
-            await context.bot.send_photo(
-                partner,
-                update.message.photo[-1].file_id,
-                caption=update.message.caption,
-            )
-
-        elif update.message.voice:
-            await context.bot.send_voice(
-                partner,
-                update.message.voice.file_id,
-            )
-
-
-async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "💎 Premium Plans\n\n"
-        "₹49 - Weekly\n"
-        "₹99 - Monthly\n\n"
-        "Benefits:\n"
-        "✅ Unlimited Matches\n"
-        "✅ Gender Filters\n"
-        "✅ Priority Matching\n"
-        "✅ No Limits"
-    )
-
+# =========================
+# ADMIN USERS
+# =========================
 
 async def users(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat_id == ADMIN_ID:
-        total = len(users_data)
 
-        premium_users = sum(
-            1 for u in users_data.values() if u["premium"]
+    if update.message.chat_id == ADMIN_ID:
+
+        total = (
+            len(waiting_male)
+            + len(waiting_female)
+            + len(active_chats)
         )
 
         await update.message.reply_text(
-            f"👥 Total Users: {total}\n"
-            f"💎 Premium Users: {premium_users}\n"
-            f"🔥 Active Chats: {len(active_chats)//2}"
+            f"👥 Total Users: {total}"
         )
 
+# =========================
+# PREMIUM
+# =========================
+
+async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if update.message.chat_id == ADMIN_ID:
+
+        try:
+            uid = int(context.args[0])
+
+            premium_users.append(uid)
+
+            await update.message.reply_text(
+                "✅ Premium Added"
+            )
+
+        except:
+            await update.message.reply_text(
+                "/premium USER_ID"
+            )
+
+# =========================
+# BOT START
+# =========================
 
 app = ApplicationBuilder().token(TOKEN).build()
 
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, age)],
-        GENDER: [CallbackQueryHandler(gender)],
-        INTEREST: [CallbackQueryHandler(interest)],
-        BIO: [MessageHandler(filters.TEXT & ~filters.COMMAND, bio)],
-    },
-    fallbacks=[],
-)
-
-app.add_handler(conv_handler)
-
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("setprofile", setprofile))
+app.add_handler(CommandHandler("profile", profile))
 app.add_handler(CommandHandler("find", find))
 app.add_handler(CommandHandler("stop", stop))
 app.add_handler(CommandHandler("next", next_chat))
-app.add_handler(CommandHandler("profile", profile))
-app.add_handler(CommandHandler("premium", premium))
 app.add_handler(CommandHandler("users", users))
-
-app.add_handler(CallbackQueryHandler(match_response))
+app.add_handler(CommandHandler("premium", premium))
 
 app.add_handler(
     MessageHandler(
-        filters.TEXT | filters.PHOTO | filters.VOICE,
-        handle_message,
+        filters.TEXT & ~filters.COMMAND,
+        handle_message
     )
 )
 
 print("Bot Running...")
+
 app.run_polling()
